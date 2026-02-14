@@ -1,0 +1,19 @@
+# Xcode
+*.xcodeproj/
+xcuserdata/
+*.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+
+# Build
+build/
+DerivedData/
+
+# Dependencies
+.build/
+Packages/
+
+# OS
+.DS_Store
+
+# SPM
+*.resolved
