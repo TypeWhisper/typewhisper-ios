@@ -22,7 +22,14 @@ class KeyboardAudioService {
 
     /// Signal the main app to start recording
     func startRecording() -> String? {
-        let language = sharedDefaults?.string(forKey: "language") ?? "auto"
+        var language = sharedDefaults?.string(forKey: "language") ?? "auto"
+        if language == "auto" {
+            language = Locale.current.language.languageCode.flatMap { lang in
+                Locale.current.language.region.map { region in
+                    "\(lang.identifier)-\(region.identifier)"
+                }
+            } ?? "auto"
+        }
         logger.info("startRecording called with language: \(language)")
 
         guard isFlowSessionActive else {

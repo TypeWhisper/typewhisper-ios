@@ -41,7 +41,7 @@ final class ServiceContainer: ObservableObject {
         dictionaryService = DictionaryService()
         snippetService = SnippetService()
         soundService = SoundService()
-        flowSessionManager = FlowSessionManager(modelManager: modelManagerService)
+        flowSessionManager = FlowSessionManager()
 
         // ViewModels
         modelManagerViewModel = ModelManagerViewModel(modelManager: modelManagerService)

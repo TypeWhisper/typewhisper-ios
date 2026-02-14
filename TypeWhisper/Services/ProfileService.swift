@@ -88,6 +88,33 @@ final class ProfileService: ObservableObject {
         } catch {
             profiles = []
         }
+        syncProfilesToKeyboard()
+    }
+
+    private func syncProfilesToKeyboard() {
+        guard let groupURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: TypeWhisperConstants.appGroupIdentifier
+        ) else { return }
+
+        let dtos = profiles
+            .filter { $0.isEnabled }
+            .sorted { $0.priority > $1.priority }
+            .map { KeyboardProfileDTO(
+                id: $0.id,
+                name: $0.name,
+                inputLanguage: $0.inputLanguage,
+                translationTargetLanguage: $0.translationTargetLanguage,
+                priority: $0.priority,
+                isEnabled: $0.isEnabled
+            )}
+
+        let fileURL = groupURL.appending(path: TypeWhisperConstants.SharedFiles.keyboardProfilesFile)
+        do {
+            let data = try JSONEncoder().encode(dtos)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            print("ProfileService sync error: \(error)")
+        }
     }
 
     private func save() {

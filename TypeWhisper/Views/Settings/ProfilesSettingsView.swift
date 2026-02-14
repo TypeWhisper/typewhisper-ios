@@ -3,6 +3,30 @@ import SwiftUI
 struct ProfilesSettingsView: View {
     @EnvironmentObject private var viewModel: ProfilesViewModel
 
+    private struct SpeechLanguage: Identifiable {
+        let code: String
+        let name: String
+        var id: String { code }
+    }
+
+    private static let speechLanguages: [SpeechLanguage] = [
+        SpeechLanguage(code: "de-DE", name: "Deutsch"),
+        SpeechLanguage(code: "en-US", name: "English (US)"),
+        SpeechLanguage(code: "en-GB", name: "English (UK)"),
+        SpeechLanguage(code: "es-ES", name: "Español"),
+        SpeechLanguage(code: "fr-FR", name: "Français"),
+        SpeechLanguage(code: "it-IT", name: "Italiano"),
+        SpeechLanguage(code: "pt-BR", name: "Português (BR)"),
+        SpeechLanguage(code: "nl-NL", name: "Nederlands"),
+        SpeechLanguage(code: "pl-PL", name: "Polski"),
+        SpeechLanguage(code: "ru-RU", name: "Русский"),
+        SpeechLanguage(code: "ja-JP", name: "日本語"),
+        SpeechLanguage(code: "zh-CN", name: "中文 (简体)"),
+        SpeechLanguage(code: "ko-KR", name: "한국어"),
+        SpeechLanguage(code: "tr-TR", name: "Türkçe"),
+        SpeechLanguage(code: "ar-SA", name: "العربية"),
+    ]
+
     var body: some View {
         List {
             Section {
@@ -58,8 +82,10 @@ struct ProfilesSettingsView: View {
                     TextField("Name", text: $viewModel.editorName)
 
                     Picker("Language", selection: $viewModel.editorInputLanguage) {
-                        Text("Default").tag(nil as String?)
-                        Text("Auto-detect").tag("auto" as String?)
+                        Text("Auto-detect").tag(nil as String?)
+                        ForEach(ProfilesSettingsView.speechLanguages, id: \.code) { lang in
+                            Text(lang.name).tag(lang.code as String?)
+                        }
                     }
 
                     Picker("Translation", selection: $viewModel.editorTranslationTargetLanguage) {

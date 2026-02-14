@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import os.log
+import Translation
 
 private let logger = Logger(subsystem: "com.typewhisper.keyboard", category: "ViewModel")
 
@@ -29,6 +30,9 @@ struct KeyboardHostingView: View {
                 theme: theme
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .translationTask(viewModel.translationConfig) { session in
+                await viewModel.handleTranslation(session)
+            }
             .onAppear {
                 viewModel.insertTextHandler = { text in
                     textDocumentProxy.insertText(text)
@@ -43,6 +47,7 @@ struct KeyboardHostingView: View {
                         responder = r.next
                     }
                 }
+                viewModel.loadProfiles()
                 viewModel.refreshFlowStatus()
             }
         }
@@ -61,6 +66,10 @@ class KeyboardViewModel: ObservableObject {
     @Published var bannerMessage: String?
     @Published var bannerActionTitle: String = L10n.openApp
     @Published var bannerOpensSettings = false
+    @Published var availableProfiles: [KeyboardProfileDTO] = []
+    @Published var selectedProfileId: UUID?
+    @Published var translationConfig: TranslationSession.Configuration?
+    private var pendingTranslationText: String?
 
     private var audioService: KeyboardAudioService?
     private var levelUpdateTimer: Timer?
@@ -91,6 +100,63 @@ class KeyboardViewModel: ObservableObject {
 
     func handleSpaceTap() {
         error = nil
+    }
+
+    func loadProfiles() {
+        guard let groupURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: KeyboardConstants.appGroupIdentifier
+        ) else { return }
+
+        let fileURL = groupURL.appending(path: KeyboardConstants.SharedFiles.keyboardProfilesFile)
+        guard let data = try? Data(contentsOf: fileURL),
+              let profiles = try? JSONDecoder().decode([KeyboardProfileDTO].self, from: data) else {
+            availableProfiles = []
+            return
+        }
+
+        availableProfiles = profiles
+
+        let defaults = UserDefaults(suiteName: KeyboardConstants.appGroupIdentifier)
+        if let savedId = defaults?.string(forKey: KeyboardConstants.SharedDefaults.selectedProfileId),
+           let uuid = UUID(uuidString: savedId),
+           profiles.contains(where: { $0.id == uuid }) {
+            selectedProfileId = uuid
+        } else {
+            selectedProfileId = nil
+        }
+
+        // Only apply language if a profile is actively selected
+        if let profileId = selectedProfileId,
+           let profile = availableProfiles.first(where: { $0.id == profileId }),
+           let lang = profile.inputLanguage {
+            let defaults = UserDefaults(suiteName: KeyboardConstants.appGroupIdentifier)
+            defaults?.set(lang, forKey: "language")
+            currentLanguage = lang
+        } else {
+            currentLanguage = readTranscriptionLanguage()
+        }
+    }
+
+    func selectProfile(_ profile: KeyboardProfileDTO) {
+        if selectedProfileId == profile.id {
+            deselectProfile()
+            return
+        }
+        selectedProfileId = profile.id
+        let defaults = UserDefaults(suiteName: KeyboardConstants.appGroupIdentifier)
+        defaults?.set(profile.id.uuidString, forKey: KeyboardConstants.SharedDefaults.selectedProfileId)
+        if let lang = profile.inputLanguage {
+            defaults?.set(lang, forKey: "language")
+            currentLanguage = lang
+        }
+    }
+
+    func deselectProfile() {
+        selectedProfileId = nil
+        let defaults = UserDefaults(suiteName: KeyboardConstants.appGroupIdentifier)
+        defaults?.removeObject(forKey: KeyboardConstants.SharedDefaults.selectedProfileId)
+        defaults?.removeObject(forKey: "language")
+        currentLanguage = "auto"
     }
 
     private func readTranscriptionLanguage() -> String {
@@ -333,8 +399,43 @@ class KeyboardViewModel: ObservableObject {
             return
         }
 
+        // Check if selected profile has translation target
+        if let profileId = selectedProfileId,
+           let profile = availableProfiles.first(where: { $0.id == profileId }),
+           let targetLang = profile.translationTargetLanguage {
+            pendingTranslationText = text
+            let sourceLang = profile.inputLanguage.flatMap { Locale.Language(identifier: $0) }
+            let targetLanguage = Locale.Language(identifier: targetLang)
+            translationConfig = .init(source: sourceLang, target: targetLanguage)
+            isProcessing = true
+            return
+        }
+
         self.insertTextHandler?(text)
         self.saveToKeyboardHistory(rawText: text, finalText: text)
+    }
+
+    func handleTranslation(_ session: sending TranslationSession) async {
+        guard let text = pendingTranslationText else { return }
+        do {
+            let result = try await session.translate(text)
+            await MainActor.run {
+                self.insertTextHandler?(result.targetText)
+                self.saveToKeyboardHistory(rawText: text, finalText: result.targetText)
+                self.isProcessing = false
+                self.pendingTranslationText = nil
+                self.translationConfig = nil
+            }
+        } catch {
+            logger.error("Translation failed: \(error.localizedDescription)")
+            await MainActor.run {
+                self.insertTextHandler?(text)
+                self.saveToKeyboardHistory(rawText: text, finalText: text)
+                self.isProcessing = false
+                self.pendingTranslationText = nil
+                self.translationConfig = nil
+            }
+        }
     }
 
     private func saveToKeyboardHistory(rawText: String, finalText: String) {

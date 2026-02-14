@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import Speech
 import UIKit
 import os.log
 
@@ -35,31 +36,20 @@ private func calculateFlowAudioLevels(from buffer: AVAudioPCMBuffer, barCount: I
     return levels
 }
 
-/// Thread-safe audio buffer store for flow recording
-private final class FlowAudioBufferStore: @unchecked Sendable {
+/// Thread-safe holder for the active recognition request — allows audio tap to append buffers
+private final class FlowRecognitionState: @unchecked Sendable {
     private let lock = NSLock()
-    private var _buffers: [AVAudioPCMBuffer] = []
+    private var _request: SFSpeechAudioBufferRecognitionRequest?
 
-    func append(_ buffer: AVAudioPCMBuffer, maxSamples: Int) {
-        lock.lock()
-        _buffers.append(buffer)
-        var totalSamples = _buffers.reduce(0) { $0 + Int($1.frameLength) }
-        while totalSamples > maxSamples && _buffers.count > 1 {
-            let removed = _buffers.removeFirst()
-            totalSamples -= Int(removed.frameLength)
-        }
-        lock.unlock()
-    }
-
-    var buffers: [AVAudioPCMBuffer] {
+    var request: SFSpeechAudioBufferRecognitionRequest? {
         lock.lock()
         defer { lock.unlock() }
-        return _buffers
+        return _request
     }
 
-    func removeAll() {
+    func set(_ request: SFSpeechAudioBufferRecognitionRequest?) {
         lock.lock()
-        _buffers.removeAll()
+        _request = request
         lock.unlock()
     }
 }
@@ -71,67 +61,48 @@ private func installFlowAudioTap(
     format: AVAudioFormat,
     recordingFlag: OSAllocatedUnfairLock<Bool>,
     defaults: UserDefaults?,
-    bufferStore: FlowAudioBufferStore,
-    maxSamples: Int
+    recognitionState: FlowRecognitionState
 ) {
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-        let currentlyRecording = recordingFlag.withLock { $0 }
-
+        // Always write audio levels for keyboard visualization
         let levels = calculateFlowAudioLevels(from: buffer, barCount: 24)
         let levelsAsDouble = levels.map { Double($0) }
         defaults?.set(levelsAsDouble, forKey: TypeWhisperConstants.SharedDefaults.audioLevels)
         defaults?.synchronize()
 
+        // If recording, append buffer directly to the recognition request
+        let currentlyRecording = recordingFlag.withLock { $0 }
         guard currentlyRecording else { return }
 
-        if let bufferCopy = copyFlowAudioBuffer(buffer) {
-            bufferStore.append(bufferCopy, maxSamples: maxSamples)
-        }
+        recognitionState.request?.append(buffer)
     }
-}
-
-/// Copy audio buffer — free function to avoid @MainActor metatype isolation
-private func copyFlowAudioBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-    guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameCapacity) else {
-        return nil
-    }
-    copy.frameLength = buffer.frameLength
-
-    if let srcData = buffer.floatChannelData, let dstData = copy.floatChannelData {
-        for channel in 0..<Int(buffer.format.channelCount) {
-            memcpy(dstData[channel], srcData[channel], Int(buffer.frameLength) * MemoryLayout<Float>.size)
-        }
-    }
-    return copy
 }
 
 /// Manages "Flow Sessions" — the main app continuously records audio in the background
 /// and the keyboard extension signals when to transcribe via shared UserDefaults.
-/// Uses local WhisperKit transcription instead of API calls.
+/// Uses Apple's on-device speech recognition (SFSpeechRecognizer) directly.
 @MainActor
 class FlowSessionManager: ObservableObject {
     private let logger = Logger(subsystem: "com.typewhisper", category: "FlowSession")
 
     private let sharedDefaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier)
-    private let modelManager: ModelManagerService
 
     @Published var isFlowSessionActive = false
     @Published var sessionExpiresAt: Date?
     @Published var isRecording = false
     @Published var lastTranscription: String?
+    @Published var openedFromKeyboard = false
 
     private var audioEngine: AVAudioEngine?
     private var sessionTimer: Timer?
     private var pollingTimer: Timer?
 
     private let isRecordingAtomic = OSAllocatedUnfairLock(initialState: false)
-    private var recordingStartTime: Date?
-    private let flowBufferStore = FlowAudioBufferStore()
-    private var recordingFormat: AVAudioFormat?
-    private let maxBufferDuration: TimeInterval = 60
+    private let recognitionState = FlowRecognitionState()
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var recognitionTimeoutWork: DispatchWorkItem?
 
-    init(modelManager: ModelManagerService) {
-        self.modelManager = modelManager
+    init() {
         checkExistingSession()
     }
 
@@ -162,6 +133,12 @@ class FlowSessionManager: ObservableObject {
         } catch {
             logger.error("Failed to configure audio session: \(error)")
             return
+        }
+
+        // Ensure speech recognition is authorized
+        let authStatus = SFSpeechRecognizer.authorizationStatus()
+        if authStatus == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { _ in }
         }
 
         sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
@@ -198,10 +175,12 @@ class FlowSessionManager: ObservableObject {
         pollingTimer?.invalidate()
         pollingTimer = nil
 
+        // Cancel any active recognition
+        cancelRecognition()
+
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
-        flowBufferStore.removeAll()
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
@@ -241,18 +220,13 @@ class FlowSessionManager: ObservableObject {
 
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-        recordingFormat = format
 
-        flowBufferStore.removeAll()
-
-        let maxSamples = Int(format.sampleRate * maxBufferDuration)
         installFlowAudioTap(
             on: inputNode,
             format: format,
             recordingFlag: isRecordingAtomic,
             defaults: sharedDefaults,
-            bufferStore: flowBufferStore,
-            maxSamples: maxSamples
+            recognitionState: recognitionState
         )
 
         do {
@@ -261,6 +235,98 @@ class FlowSessionManager: ObservableObject {
         } catch {
             logger.error("Failed to start audio engine: \(error)")
         }
+    }
+
+    // MARK: - Speech Recognition
+
+    private func startRecognition() {
+        let language = sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.transcriptionLanguage)
+        let effectiveLanguage = (language == "auto") ? nil : language
+
+        let recognizer: SFSpeechRecognizer
+        if let lang = effectiveLanguage {
+            recognizer = SFSpeechRecognizer(locale: Locale(identifier: lang)) ?? SFSpeechRecognizer()!
+        } else {
+            recognizer = SFSpeechRecognizer()!
+        }
+
+        guard recognizer.isAvailable else {
+            logger.error("Speech recognizer not available")
+            sharedDefaults?.set("Speech recognizer not available", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+            sharedDefaults?.synchronize()
+            return
+        }
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = false
+        request.addsPunctuation = true
+
+        recognitionState.set(request)
+
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+
+                self.recognitionTimeoutWork?.cancel()
+                self.recognitionTimeoutWork = nil
+
+                if let error {
+                    self.logger.error("Recognition error: \(error.localizedDescription)")
+                    self.sharedDefaults?.set(error.localizedDescription, forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+                    self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+                    self.sharedDefaults?.synchronize()
+                } else if let result, result.isFinal {
+                    let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.logger.info("Transcription result: \(text)")
+
+                    if text.isEmpty {
+                        self.sharedDefaults?.set("No text recognized", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+                    } else {
+                        self.lastTranscription = text
+                        self.sharedDefaults?.set(text, forKey: TypeWhisperConstants.SharedDefaults.transcriptionResult)
+                        self.sharedDefaults?.removeObject(forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+                    }
+                    self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+                    self.sharedDefaults?.synchronize()
+                }
+
+                self.recognitionState.set(nil)
+                self.recognitionTask = nil
+            }
+        }
+
+        logger.info("Recognition started (language: \(effectiveLanguage ?? "auto"))")
+    }
+
+    private func stopRecognition() {
+        // End the audio stream — recognizer will produce final result via callback
+        recognitionState.request?.endAudio()
+
+        // Timeout after 30s if no result
+        let timeout = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.recognitionTask != nil else { return }
+                self.logger.warning("Recognition timed out")
+                self.recognitionTask?.cancel()
+                self.recognitionTask = nil
+                self.recognitionState.set(nil)
+                self.sharedDefaults?.set("Recognition timed out", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+                self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+                self.sharedDefaults?.synchronize()
+            }
+        }
+        recognitionTimeoutWork = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+    }
+
+    private func cancelRecognition() {
+        recognitionTimeoutWork?.cancel()
+        recognitionTimeoutWork = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionState.set(nil)
     }
 
     // MARK: - Keyboard Signal Polling
@@ -280,7 +346,7 @@ class FlowSessionManager: ObservableObject {
             if !isRecording {
                 isRecording = true
                 isRecordingAtomic.withLock { $0 = true }
-                recordingStartTime = Date()
+                startRecognition()
                 logger.info("Keyboard started recording")
             }
 
@@ -288,145 +354,17 @@ class FlowSessionManager: ObservableObject {
             if isRecording {
                 isRecording = false
                 isRecordingAtomic.withLock { $0 = false }
-                logger.info("Keyboard stopped recording - starting transcription")
+                logger.info("Keyboard stopped recording - finishing recognition")
 
                 sharedDefaults?.set("processing", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
                 sharedDefaults?.synchronize()
 
-                Task {
-                    await transcribeRecordedAudio()
-                }
+                stopRecognition()
             }
 
         default:
             break
         }
-    }
-
-    // MARK: - Transcription (Local WhisperKit)
-
-    private func transcribeRecordedAudio() async {
-        guard recordingStartTime != nil else {
-            logger.error("No recording start time")
-            sharedDefaults?.set("No recording", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            sharedDefaults?.synchronize()
-            return
-        }
-
-        let buffersToTranscribe = flowBufferStore.buffers
-        guard !buffersToTranscribe.isEmpty, let format = recordingFormat else {
-            logger.error("No audio buffers to transcribe")
-            sharedDefaults?.set("No audio", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            sharedDefaults?.synchronize()
-            return
-        }
-
-        // Convert buffers to 16kHz Float samples for WhisperKit
-        guard let samples = convertBuffersToSamples(buffersToTranscribe, format: format) else {
-            logger.error("Failed to convert audio buffers")
-            sharedDefaults?.set("Audio conversion failed", forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            sharedDefaults?.synchronize()
-            return
-        }
-
-        let language = sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.transcriptionLanguage)
-        let effectiveLanguage = (language == "auto") ? nil : language
-
-        do {
-            let result = try await modelManager.transcribe(
-                audioSamples: samples,
-                language: effectiveLanguage,
-                task: .transcribe
-            )
-            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            logger.info("Transcription result: \(text)")
-
-            lastTranscription = text
-            sharedDefaults?.set(text, forKey: TypeWhisperConstants.SharedDefaults.transcriptionResult)
-            sharedDefaults?.removeObject(forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            sharedDefaults?.synchronize()
-        } catch {
-            logger.error("Transcription error: \(error)")
-            sharedDefaults?.set(error.localizedDescription, forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            sharedDefaults?.synchronize()
-        }
-
-        flowBufferStore.removeAll()
-        recordingStartTime = nil
-    }
-
-    /// Convert audio buffers to 16kHz mono Float samples for WhisperKit
-    private func convertBuffersToSamples(_ buffers: [AVAudioPCMBuffer], format: AVAudioFormat) -> [Float]? {
-        var totalFrames: AVAudioFrameCount = 0
-        for buffer in buffers {
-            totalFrames += buffer.frameLength
-        }
-        guard totalFrames > 0 else { return nil }
-
-        // Combine all buffers into one
-        guard let combinedBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: totalFrames) else {
-            return nil
-        }
-
-        var offset: AVAudioFrameCount = 0
-        for buffer in buffers {
-            if let srcData = buffer.floatChannelData, let dstData = combinedBuffer.floatChannelData {
-                for channel in 0..<Int(format.channelCount) {
-                    memcpy(
-                        dstData[channel].advanced(by: Int(offset)),
-                        srcData[channel],
-                        Int(buffer.frameLength) * MemoryLayout<Float>.size
-                    )
-                }
-            }
-            offset += buffer.frameLength
-        }
-        combinedBuffer.frameLength = totalFrames
-
-        // Resample to 16kHz mono
-        let targetSampleRate: Double = 16000
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: targetSampleRate,
-            channels: 1,
-            interleaved: false
-        ) else { return nil }
-
-        guard let converter = AVAudioConverter(from: format, to: targetFormat) else { return nil }
-
-        let ratio = targetSampleRate / format.sampleRate
-        let outputFrameCount = AVAudioFrameCount(Double(totalFrames) * ratio)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else {
-            return nil
-        }
-
-        let consumed = OSAllocatedUnfairLock(initialState: false)
-        var error: NSError?
-        converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-            let wasConsumed = consumed.withLock { flag in
-                let prev = flag
-                flag = true
-                return prev
-            }
-            if wasConsumed {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            outStatus.pointee = .haveData
-            return combinedBuffer
-        }
-
-        guard error == nil, outputBuffer.frameLength > 0,
-              let channelData = outputBuffer.floatChannelData?[0] else {
-            return nil
-        }
-
-        return Array(UnsafeBufferPointer(start: channelData, count: Int(outputBuffer.frameLength)))
     }
 
     // MARK: - URL Handling
@@ -444,6 +382,7 @@ class FlowSessionManager: ObservableObject {
                let durationValue = TimeInterval(durationParam) {
                 duration = durationValue
             }
+            openedFromKeyboard = true
             startFlowSession(duration: duration)
             return true
 

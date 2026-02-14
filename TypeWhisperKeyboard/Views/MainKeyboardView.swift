@@ -91,6 +91,16 @@ struct MainKeyboardView: View {
                     if !viewModel.isRecording {
                         if viewModel.isProcessing {
                             statusBar
+                        } else if !viewModel.availableProfiles.isEmpty {
+                            ProfileSelectorView(
+                                profiles: viewModel.availableProfiles,
+                                selectedProfileId: viewModel.selectedProfileId,
+                                onSelect: { viewModel.selectProfile($0) },
+                                onDeselect: { viewModel.deselectProfile() },
+                                theme: theme,
+                                metrics: metrics
+                            )
+                            .padding(.horizontal, metrics.outerHorizontalPadding)
                         }
                     }
                     keyboardRows
@@ -278,18 +288,18 @@ struct MainKeyboardView: View {
 
     private var recordingOverlay: some View {
         VStack(spacing: metrics.rowSpacing) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 RippleRingsView(
                     audioLevel: averageAudioLevel,
                     color: theme.levelBar
                 )
-                .frame(width: 120, height: 120)
+                .frame(width: 90, height: 90)
 
                 CenterWaveformView(
                     levels: viewModel.audioLevels,
                     barColor: theme.levelBar
                 )
-                .frame(height: 50)
+                .frame(height: 36)
                 .padding(.horizontal, 16)
             }
             .frame(maxHeight: .infinity)

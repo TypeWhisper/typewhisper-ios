@@ -17,3 +17,7 @@ Packages/
 
 # SPM
 *.resolved
+
+# Claude / AI
+.claude/
+.agents/
