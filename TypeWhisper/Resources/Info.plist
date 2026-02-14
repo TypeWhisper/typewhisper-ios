@@ -22,6 +22,17 @@
     <string>TypeWhisper needs microphone access to transcribe your speech.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>TypeWhisper needs speech recognition access for Apple's on-device transcription.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.typewhisper.ios</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>typewhisper</string>
+            </array>
+        </dict>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
 </dict>

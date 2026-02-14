@@ -16,6 +16,7 @@ final class ServiceContainer: ObservableObject {
     let dictionaryService: DictionaryService
     let snippetService: SnippetService
     let soundService: SoundService
+    let flowSessionManager: FlowSessionManager
 
     // ViewModels
     let modelManagerViewModel: ModelManagerViewModel
@@ -40,6 +41,7 @@ final class ServiceContainer: ObservableObject {
         dictionaryService = DictionaryService()
         snippetService = SnippetService()
         soundService = SoundService()
+        flowSessionManager = FlowSessionManager(modelManager: modelManagerService)
 
         // ViewModels
         modelManagerViewModel = ModelManagerViewModel(modelManager: modelManagerService)

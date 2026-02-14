@@ -19,7 +19,11 @@ struct TypeWhisperApp: App {
                 .environmentObject(container.homeViewModel)
                 .environmentObject(container.fileTranscriptionViewModel)
                 .environmentObject(container.translationService)
+                .environmentObject(container.flowSessionManager)
                 .modifier(TranslationTaskModifier(translationService: container.translationService))
+                .onOpenURL { url in
+                    container.flowSessionManager.handleURL(url)
+                }
                 .task {
                     await container.initialize()
                 }
