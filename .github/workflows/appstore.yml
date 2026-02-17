@@ -161,7 +161,10 @@ jobs:
           mkdir -p ~/.private_keys
           echo "$API_KEY_P8" > ~/.private_keys/AuthKey_${API_KEY_ID}.p8
 
-          xcrun altool --upload-package "$EXPORT_PATH/TypeWhisper.ipa" \
+          IPA_PATH=$(ls "$EXPORT_PATH"/*.ipa)
+          echo "Found IPA: $IPA_PATH"
+
+          xcrun altool --upload-package "$IPA_PATH" \
             --type ios \
             --apple-id 6759305003 \
             --bundle-id com.typewhisper.typewhisper-ios \
