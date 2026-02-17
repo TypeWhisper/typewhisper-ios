@@ -1,0 +1,178 @@
+name: App Store Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number (e.g. 1.0.0)"
+        required: true
+        type: string
+      build_number:
+        description: "Build number (optional - uses GitHub run number if empty)"
+        required: false
+        type: string
+
+env:
+  SCHEME: TypeWhisper
+  PROJECT: TypeWhisper.xcodeproj
+  ARCHIVE_PATH: build/TypeWhisper.xcarchive
+  EXPORT_PATH: build/export
+  KEYCHAIN_NAME: signing.keychain-db
+  KEYCHAIN_PASSWORD: ${{ github.run_id }}
+
+jobs:
+  build-and-upload:
+    name: Build & Upload to App Store
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.2"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve SPM packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" \
+            -scheme "$SCHEME"
+
+      - name: Set version and build number
+        run: |
+          BUILD_NUMBER="${{ inputs.build_number }}"
+          if [ -z "$BUILD_NUMBER" ]; then
+            BUILD_NUMBER="${{ github.run_number }}"
+          fi
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+          echo "Version: ${{ inputs.version }}, Build: $BUILD_NUMBER"
+
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.IOS_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.IOS_SIGNING_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_NAME"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_NAME"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security list-keychain -d user -s "$KEYCHAIN_NAME" login.keychain-db
+
+      - name: Install provisioning profiles
+        env:
+          APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE }}
+          KEYBOARD_PROFILE_BASE64: ${{ secrets.IOS_KEYBOARD_PROVISIONING_PROFILE }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+
+          # App profile
+          APP_PROFILE_PATH="$RUNNER_TEMP/app_profile.mobileprovision"
+          echo "$APP_PROFILE_BASE64" | base64 --decode > "$APP_PROFILE_PATH"
+          APP_PROFILE_UUID=$(/usr/bin/security cms -D -i "$APP_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
+          APP_PROFILE_NAME=$(/usr/bin/security cms -D -i "$APP_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
+          cp "$APP_PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$APP_PROFILE_UUID.mobileprovision"
+          echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> $GITHUB_ENV
+          echo "Installed app profile: $APP_PROFILE_NAME ($APP_PROFILE_UUID)"
+
+          # Keyboard extension profile
+          KB_PROFILE_PATH="$RUNNER_TEMP/keyboard_profile.mobileprovision"
+          echo "$KEYBOARD_PROFILE_BASE64" | base64 --decode > "$KB_PROFILE_PATH"
+          KB_PROFILE_UUID=$(/usr/bin/security cms -D -i "$KB_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
+          KB_PROFILE_NAME=$(/usr/bin/security cms -D -i "$KB_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
+          cp "$KB_PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$KB_PROFILE_UUID.mobileprovision"
+          echo "KB_PROFILE_NAME=$KB_PROFILE_NAME" >> $GITHUB_ENV
+          echo "Installed keyboard profile: $KB_PROFILE_NAME ($KB_PROFILE_UUID)"
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM=2D8ALY3LCL \
+            MARKETING_VERSION="${{ inputs.version }}" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | xcpretty
+
+      - name: Generate ExportOptions.plist
+        run: |
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>2D8ALY3LCL</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.typewhisper.typewhisper-ios</key>
+              <string>${APP_PROFILE_NAME}</string>
+              <key>com.typewhisper.typewhisper-ios.TypeWhisperKeyboard</key>
+              <string>${KB_PROFILE_NAME}</string>
+            </dict>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>uploadBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath "$EXPORT_PATH" \
+            | xcpretty
+
+      - name: Upload to App Store Connect
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          # Write API key to file
+          mkdir -p ~/.private_keys
+          echo "$API_KEY_P8" > ~/.private_keys/AuthKey_${API_KEY_ID}.p8
+
+          xcrun altool --upload-package "$EXPORT_PATH/TypeWhisper.ipa" \
+            --type ios \
+            --apple-id 6759305003 \
+            --bundle-id com.typewhisper.typewhisper-ios \
+            --bundle-version "$BUILD_NUMBER" \
+            --bundle-short-version-string "${{ inputs.version }}" \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$API_ISSUER_ID"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN_NAME" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          rm -f "$RUNNER_TEMP/app_profile.mobileprovision"
+          rm -f "$RUNNER_TEMP/keyboard_profile.mobileprovision"
+          rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/
+          rm -rf ~/.private_keys/
