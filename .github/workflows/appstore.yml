@@ -37,6 +37,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Download iOS platform
+        run: xcodebuild -downloadPlatform iOS
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -109,8 +112,7 @@ jobs:
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM=2D8ALY3LCL \
             MARKETING_VERSION="${{ inputs.version }}" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            | xcpretty
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
       - name: Generate ExportOptions.plist
         run: |
@@ -148,8 +150,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist build/ExportOptions.plist \
-            -exportPath "$EXPORT_PATH" \
-            | xcpretty
+            -exportPath "$EXPORT_PATH"
 
       - name: Upload to App Store Connect
         env:
