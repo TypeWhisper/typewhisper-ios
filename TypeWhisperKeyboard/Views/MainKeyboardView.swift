@@ -88,6 +88,7 @@ struct MainKeyboardView: View {
                 theme.backgroundGradient
 
                 VStack(spacing: metrics.sectionSpacing) {
+                    Spacer(minLength: 0)
                     if !viewModel.isRecording {
                         if viewModel.isProcessing {
                             statusBar

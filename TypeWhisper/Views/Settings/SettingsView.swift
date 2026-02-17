@@ -2,10 +2,45 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var modelManager: ModelManagerViewModel
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var keyboardActivated = false
+    @State private var keyboardHasFullAccess = false
 
     var body: some View {
         NavigationStack {
             List {
+                if !keyboardActivated || !keyboardHasFullAccess {
+                    Section("Keyboard") {
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label {
+                                Text("Keyboard Enabled")
+                            } icon: {
+                                Image(systemName: keyboardActivated ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(keyboardActivated ? .green : .secondary)
+                            }
+                        }
+                        .disabled(keyboardActivated)
+
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label {
+                                Text("Full Access")
+                            } icon: {
+                                Image(systemName: keyboardHasFullAccess ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(keyboardHasFullAccess ? .green : .secondary)
+                            }
+                        }
+                        .disabled(keyboardHasFullAccess)
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         ModelManagerView()
@@ -79,6 +114,19 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear { checkKeyboardSetup() }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    checkKeyboardSetup()
+                }
+            }
         }
+    }
+
+    private func checkKeyboardSetup() {
+        guard let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) else { return }
+        let lastChecked = defaults.double(forKey: TypeWhisperConstants.SharedDefaults.keyboardLastCheckedAt)
+        keyboardActivated = lastChecked > 0
+        keyboardHasFullAccess = defaults.bool(forKey: TypeWhisperConstants.SharedDefaults.keyboardHasFullAccess)
     }
 }

@@ -3,7 +3,10 @@ import SwiftUI
 struct RecordView: View {
     @EnvironmentObject private var viewModel: RecordingViewModel
     @EnvironmentObject private var modelManager: ModelManagerViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showModelManager = false
+    @State private var keyboardActivated = false
+    @State private var keyboardHasFullAccess = false
 
     var body: some View {
         NavigationStack {
@@ -65,6 +68,12 @@ struct RecordView: View {
             } message: {
                 Text("TypeWhisper needs microphone access to transcribe your speech.")
             }
+            .onAppear { checkKeyboardSetup() }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    checkKeyboardSetup()
+                }
+            }
         }
     }
 
@@ -118,6 +127,46 @@ struct RecordView: View {
                     .multilineTextAlignment(.center)
             }
             .padding()
+        } else if viewModel.state == .idle, modelManager.isModelReady, !keyboardActivated {
+            VStack(spacing: 8) {
+                Image(systemName: "keyboard.badge.ellipsis")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("Enable Keyboard")
+                    .font(.headline)
+                Text("Go to Settings \u{2192} Keyboards \u{2192} TypeWhisper")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
+            }
+            .padding()
+        } else if viewModel.state == .idle, modelManager.isModelReady, !keyboardHasFullAccess {
+            VStack(spacing: 8) {
+                Image(systemName: "keyboard.badge.ellipsis")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("Allow Full Access")
+                    .font(.headline)
+                Text("Required for speech recognition")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
+            }
+            .padding()
         }
     }
 
@@ -154,5 +203,12 @@ struct RecordView: View {
         let seconds = Int(duration) % 60
         let tenths = Int((duration * 10).truncatingRemainder(dividingBy: 10))
         return String(format: "%d:%02d.%d", minutes, seconds, tenths)
+    }
+
+    private func checkKeyboardSetup() {
+        guard let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) else { return }
+        let lastChecked = defaults.double(forKey: TypeWhisperConstants.SharedDefaults.keyboardLastCheckedAt)
+        keyboardActivated = lastChecked > 0
+        keyboardHasFullAccess = defaults.bool(forKey: TypeWhisperConstants.SharedDefaults.keyboardHasFullAccess)
     }
 }
