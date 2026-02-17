@@ -80,8 +80,9 @@ jobs:
           # App profile
           APP_PROFILE_PATH="$RUNNER_TEMP/app_profile.mobileprovision"
           echo "$APP_PROFILE_BASE64" | base64 --decode > "$APP_PROFILE_PATH"
-          APP_PROFILE_UUID=$(/usr/bin/security cms -D -i "$APP_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
-          APP_PROFILE_NAME=$(/usr/bin/security cms -D -i "$APP_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
+          /usr/bin/security cms -D -i "$APP_PROFILE_PATH" > "$RUNNER_TEMP/app_profile.plist"
+          APP_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/app_profile.plist")
+          APP_PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/app_profile.plist")
           cp "$APP_PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$APP_PROFILE_UUID.mobileprovision"
           echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> $GITHUB_ENV
           echo "Installed app profile: $APP_PROFILE_NAME ($APP_PROFILE_UUID)"
@@ -89,8 +90,9 @@ jobs:
           # Keyboard extension profile
           KB_PROFILE_PATH="$RUNNER_TEMP/keyboard_profile.mobileprovision"
           echo "$KEYBOARD_PROFILE_BASE64" | base64 --decode > "$KB_PROFILE_PATH"
-          KB_PROFILE_UUID=$(/usr/bin/security cms -D -i "$KB_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin)
-          KB_PROFILE_NAME=$(/usr/bin/security cms -D -i "$KB_PROFILE_PATH" | /usr/libexec/PlistBuddy -c "Print :Name" /dev/stdin)
+          /usr/bin/security cms -D -i "$KB_PROFILE_PATH" > "$RUNNER_TEMP/kb_profile.plist"
+          KB_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/kb_profile.plist")
+          KB_PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/kb_profile.plist")
           cp "$KB_PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$KB_PROFILE_UUID.mobileprovision"
           echo "KB_PROFILE_NAME=$KB_PROFILE_NAME" >> $GITHUB_ENV
           echo "Installed keyboard profile: $KB_PROFILE_NAME ($KB_PROFILE_UUID)"
