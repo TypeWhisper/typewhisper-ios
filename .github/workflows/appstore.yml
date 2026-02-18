@@ -128,9 +128,9 @@ jobs:
             <string>manual</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>com.typewhisper.typewhisper-ios</key>
+              <key>com.typewhisper.typewhisper-app</key>
               <string>${APP_PROFILE_NAME}</string>
-              <key>com.typewhisper.typewhisper-ios.TypeWhisperKeyboard</key>
+              <key>com.typewhisper.typewhisper-app.keyboard</key>
               <string>${KB_PROFILE_NAME}</string>
             </dict>
             <key>signingCertificate</key>
@@ -165,8 +165,8 @@ jobs:
 
           xcrun altool --upload-package "$IPA_PATH" \
             --type ios \
-            --apple-id 6759305003 \
-            --bundle-id com.typewhisper.typewhisper-ios \
+            --apple-id 6759319267 \
+            --bundle-id com.typewhisper.typewhisper-app \
             --bundle-version "$BUILD_NUMBER" \
             --bundle-short-version-string "${{ inputs.version }}" \
             --apiKey "$API_KEY_ID" \
