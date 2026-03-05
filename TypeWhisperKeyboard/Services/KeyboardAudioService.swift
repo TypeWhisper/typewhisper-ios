@@ -30,25 +30,22 @@ class KeyboardAudioService {
                 }
             } ?? "auto"
         }
-        logger.info("startRecording called with language: \(language)")
-
         guard isFlowSessionActive else {
-            logger.warning("No Flow Session active")
             return "Start Flow"
         }
+
+        pollingTimer?.invalidate()
+        pollingTimer = nil
 
         sharedDefaults?.set(language, forKey: TypeWhisperConstants.SharedDefaults.transcriptionLanguage)
         sharedDefaults?.set("recording", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
         sharedDefaults?.synchronize()
 
-        logger.info("Signaled main app: recording started")
         return nil
     }
 
     /// Signal the main app to stop recording and wait for transcription
     func stopRecording(completion: @escaping (String?, String?) -> Void) {
-        logger.info("stopRecording called")
-
         sharedDefaults?.set("stopped", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
         sharedDefaults?.synchronize()
 
@@ -56,7 +53,7 @@ class KeyboardAudioService {
     }
 
     private func pollForResult(completion: @escaping (String?, String?) -> Void) {
-        let maxAttempts = 100
+        let maxAttempts = 300
         let counter = PollCounter()
 
         pollingTimer?.invalidate()
@@ -71,6 +68,7 @@ class KeyboardAudioService {
 
             if let result = self.sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.transcriptionResult), !result.isEmpty {
                 timer.invalidate()
+                self.pollingTimer = nil
                 self.sharedDefaults?.removeObject(forKey: TypeWhisperConstants.SharedDefaults.transcriptionResult)
                 self.sharedDefaults?.synchronize()
                 completion(result, nil)
@@ -79,6 +77,7 @@ class KeyboardAudioService {
 
             if let error = self.sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.transcriptionError), !error.isEmpty {
                 timer.invalidate()
+                self.pollingTimer = nil
                 self.sharedDefaults?.removeObject(forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
                 self.sharedDefaults?.synchronize()
                 completion(nil, error)
@@ -88,12 +87,14 @@ class KeyboardAudioService {
             let state = self.sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState) ?? "idle"
             if state == "idle" && attempts > 10 {
                 timer.invalidate()
+                self.pollingTimer = nil
                 completion(nil, nil)
                 return
             }
 
             if attempts >= maxAttempts {
                 timer.invalidate()
+                self.pollingTimer = nil
                 completion(nil, "Timeout")
             }
         }
@@ -102,7 +103,8 @@ class KeyboardAudioService {
     /// Cancel any ongoing recording
     func cancelRecording() {
         pollingTimer?.invalidate()
-        sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+        pollingTimer = nil
+        sharedDefaults?.set("aborted", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
         sharedDefaults?.synchronize()
     }
 
