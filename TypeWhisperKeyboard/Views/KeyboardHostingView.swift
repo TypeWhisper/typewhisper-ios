@@ -259,10 +259,13 @@ class KeyboardViewModel: ObservableObject {
         isRecording = false
         isProcessing = false
         isPendingStart = false
+        translationConfig = nil
+        pendingTranslationText = nil
         stopFlowStatusTimer()
         audioService?.cancelRecording()
         audioLevels = Array(repeating: 0, count: 24)
     }
+
 
     func openMainApp() {
         if bannerOpensSettings {
