@@ -274,6 +274,8 @@ class FlowSessionManager: ObservableObject {
 
                 if let error {
                     self.logger.error("Recognition error: \(error.localizedDescription)")
+                    self.isRecording = false
+                    self.isRecordingAtomic.withLock { $0 = false }
                     self.sharedDefaults?.set(error.localizedDescription, forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
                     self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
                     self.sharedDefaults?.synchronize()
@@ -361,6 +363,14 @@ class FlowSessionManager: ObservableObject {
 
                 stopRecognition()
             }
+
+        case "aborted":
+            logger.info("Keyboard aborted recording - cancelling recognition")
+            cancelRecognition()
+            isRecording = false
+            isRecordingAtomic.withLock { $0 = false }
+            sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+            sharedDefaults?.synchronize()
 
         default:
             break
