@@ -59,18 +59,6 @@ class KeyboardViewController: UIInputViewController {
         }
     }
 
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        if let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) {
-            let state = defaults.string(forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-            if state == "recording" {
-                defaults.set("aborted", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-                defaults.synchronize()
-            }
-        }
-    }
-
     override func textWillChange(_ textInput: UITextInput?) {}
     override func textDidChange(_ textInput: UITextInput?) {}
 
@@ -93,7 +81,7 @@ class KeyboardViewController: UIInputViewController {
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers])
             try audioSession.setActive(true)
         } catch {
             print("[KeyboardVC] Audio session setup failed: \(error)")

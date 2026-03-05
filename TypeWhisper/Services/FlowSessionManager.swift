@@ -40,6 +40,7 @@ private func calculateFlowAudioLevels(from buffer: AVAudioPCMBuffer, barCount: I
 private final class FlowRecognitionState: @unchecked Sendable {
     private let lock = NSLock()
     private var _request: SFSpeechAudioBufferRecognitionRequest?
+    private var _bufferCount: Int = 0
 
     var request: SFSpeechAudioBufferRecognitionRequest? {
         lock.lock()
@@ -47,9 +48,23 @@ private final class FlowRecognitionState: @unchecked Sendable {
         return _request
     }
 
+    var bufferCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _bufferCount
+    }
+
     func set(_ request: SFSpeechAudioBufferRecognitionRequest?) {
         lock.lock()
         _request = request
+        if request != nil { _bufferCount = 0 }
+        lock.unlock()
+    }
+
+    func appendBuffer(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        _request?.append(buffer)
+        _bufferCount += 1
         lock.unlock()
     }
 }
@@ -74,7 +89,7 @@ private func installFlowAudioTap(
         let currentlyRecording = recordingFlag.withLock { $0 }
         guard currentlyRecording else { return }
 
-        recognitionState.request?.append(buffer)
+        recognitionState.appendBuffer(buffer)
     }
 }
 
@@ -101,6 +116,8 @@ class FlowSessionManager: ObservableObject {
     private let recognitionState = FlowRecognitionState()
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionTimeoutWork: DispatchWorkItem?
+    private var recognitionGeneration = 0
+    private var appendedBufferCount = 0
 
     init() {
         checkExistingSession()
@@ -240,6 +257,11 @@ class FlowSessionManager: ObservableObject {
     // MARK: - Speech Recognition
 
     private func startRecognition() {
+        cancelRecognition()
+        recognitionGeneration += 1
+        let currentGeneration = recognitionGeneration
+        logger.info("[REC] startRecognition gen=\(currentGeneration)")
+
         let language = sharedDefaults?.string(forKey: TypeWhisperConstants.SharedDefaults.transcriptionLanguage)
         let effectiveLanguage = (language == "auto") ? nil : language
 
@@ -269,17 +291,22 @@ class FlowSessionManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
 
+                // Ignore callbacks from stale recognition sessions
+                guard self.recognitionGeneration == currentGeneration else {
+                    self.logger.info("[REC] STALE callback gen=\(currentGeneration) current=\(self.recognitionGeneration)")
+                    return
+                }
+
+                let hasResult = result != nil
+                let isFinal = result?.isFinal ?? false
+                let hasError = error != nil
+                self.logger.info("[REC] callback gen=\(currentGeneration) result=\(hasResult) isFinal=\(isFinal) error=\(hasError) err=\(error?.localizedDescription ?? "none")")
+
                 self.recognitionTimeoutWork?.cancel()
                 self.recognitionTimeoutWork = nil
 
-                if let error {
-                    self.logger.error("Recognition error: \(error.localizedDescription)")
-                    self.isRecording = false
-                    self.isRecordingAtomic.withLock { $0 = false }
-                    self.sharedDefaults?.set(error.localizedDescription, forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
-                    self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
-                    self.sharedDefaults?.synchronize()
-                } else if let result, result.isFinal {
+                // Check result FIRST - SFSpeechRecognizer can deliver both result and error
+                if let result, result.isFinal {
                     let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
                     self.logger.info("Transcription result: \(text)")
 
@@ -292,10 +319,18 @@ class FlowSessionManager: ObservableObject {
                     }
                     self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
                     self.sharedDefaults?.synchronize()
+                    self.recognitionState.set(nil)
+                    self.recognitionTask = nil
+                } else if let error {
+                    self.logger.error("Recognition error: \(error.localizedDescription)")
+                    self.isRecording = false
+                    self.isRecordingAtomic.withLock { $0 = false }
+                    self.sharedDefaults?.set(error.localizedDescription, forKey: TypeWhisperConstants.SharedDefaults.transcriptionError)
+                    self.sharedDefaults?.set("idle", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
+                    self.sharedDefaults?.synchronize()
+                    self.recognitionState.set(nil)
+                    self.recognitionTask = nil
                 }
-
-                self.recognitionState.set(nil)
-                self.recognitionTask = nil
             }
         }
 
@@ -356,7 +391,8 @@ class FlowSessionManager: ObservableObject {
             if isRecording {
                 isRecording = false
                 isRecordingAtomic.withLock { $0 = false }
-                logger.info("Keyboard stopped recording - finishing recognition")
+                let buffers = recognitionState.bufferCount
+                logger.info("[REC] stopped - buffers=\(buffers), calling stopRecognition")
 
                 sharedDefaults?.set("processing", forKey: TypeWhisperConstants.SharedDefaults.keyboardRecordingState)
                 sharedDefaults?.synchronize()
@@ -365,7 +401,7 @@ class FlowSessionManager: ObservableObject {
             }
 
         case "aborted":
-            logger.info("Keyboard aborted recording - cancelling recognition")
+            logger.info("[REC] aborted signal received, isRecording=\(isRecording)")
             cancelRecognition()
             isRecording = false
             isRecordingAtomic.withLock { $0 = false }
