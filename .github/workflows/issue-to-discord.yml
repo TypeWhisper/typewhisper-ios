@@ -11,10 +11,9 @@ jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: Post issue event to Discord #issues
+      - name: Post issue event to Discord webhook
         env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_ISSUES_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           BOT_MENTION_ID: ${{ secrets.OPENCLAW_BOT_USER_ID }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -25,17 +24,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${DISCORD_BOT_TOKEN:-}" ] || [ -z "${DISCORD_CHANNEL_ID:-}" ] || [ -z "${BOT_MENTION_ID:-}" ]; then
-            echo "Missing required secrets: DISCORD_BOT_TOKEN, DISCORD_ISSUES_CHANNEL_ID, OPENCLAW_BOT_USER_ID"
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ] || [ -z "${BOT_MENTION_ID:-}" ]; then
+            echo "Missing required secrets: DISCORD_WEBHOOK_URL, OPENCLAW_BOT_USER_ID"
             exit 1
           fi
 
           BODY_PREVIEW=$(printf "%s" "${ISSUE_BODY:-}" | tr '\n' ' ' | sed 's/\s\+/ /g' | cut -c1-220)
           CONTENT="[GH-ISSUE] New issue in ${REPO}: #${ISSUE_NUMBER} ${ISSUE_TITLE}\n${ISSUE_URL}\nAuthor: ${ISSUE_AUTHOR}\nPreview: ${BODY_PREVIEW}\n\n<@${BOT_MENTION_ID}> scout this issue now: create exactly 1 thread + 1 concrete proposal (no auto-fix)."
 
-          jq -n --arg content "$CONTENT" '{content:$content}' > payload.json
+          jq -n --arg content "$CONTENT" '{content:$content,allowed_mentions:{parse:["users"]}}' > payload.json
 
-          curl -sS -X POST "https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages" \
-            -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
+          curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             --data @payload.json
