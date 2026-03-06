@@ -1,4 +1,4 @@
-name: Issue to Discord Scout
+name: Issue Scout to Discord Thread
 
 on:
   issues:
@@ -8,13 +8,13 @@ permissions:
   contents: read
 
 jobs:
-  notify:
+  scout:
     runs-on: ubuntu-latest
     steps:
-      - name: Post issue event to Discord webhook
+      - name: Create Discord message + thread + one proposal
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          BOT_MENTION_ID: ${{ secrets.OPENCLAW_BOT_USER_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_ISSUES_CHANNEL_ID }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -24,16 +24,47 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "${DISCORD_WEBHOOK_URL:-}" ] || [ -z "${BOT_MENTION_ID:-}" ]; then
-            echo "Missing required secrets: DISCORD_WEBHOOK_URL, OPENCLAW_BOT_USER_ID"
+          if [ -z "${DISCORD_BOT_TOKEN:-}" ] || [ -z "${DISCORD_CHANNEL_ID:-}" ]; then
+            echo "Missing required secrets: DISCORD_BOT_TOKEN, DISCORD_ISSUES_CHANNEL_ID"
             exit 1
           fi
 
-          BODY_PREVIEW=$(printf "%s" "${ISSUE_BODY:-}" | tr '\n' ' ' | sed 's/\s\+/ /g' | cut -c1-220)
-          CONTENT="[GH-ISSUE] New issue in ${REPO}: #${ISSUE_NUMBER} ${ISSUE_TITLE}\n${ISSUE_URL}\nAuthor: ${ISSUE_AUTHOR}\nPreview: ${BODY_PREVIEW}\n\n<@${BOT_MENTION_ID}> scout this issue now: create exactly 1 thread + 1 concrete proposal (no auto-fix)."
+          BODY_PREVIEW=$(printf "%s" "${ISSUE_BODY:-}" | tr '\n' ' ' | sed 's/\s\+/ /g' | cut -c1-260)
 
-          jq -n --arg content "$CONTENT" '{content:$content,allowed_mentions:{parse:["users"]}}' > payload.json
+          MSG_CONTENT="[SCOUT] ${REPO} #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n${ISSUE_URL}\nAuthor: ${ISSUE_AUTHOR}\nPreview: ${BODY_PREVIEW}"
 
-          curl -sS -X POST "$DISCORD_WEBHOOK_URL" \
+          jq -n --arg content "$MSG_CONTENT" '{content:$content}' > msg.json
+
+          curl -sS -X POST "https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages" \
+            -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data @payload.json
+            --data @msg.json > message_out.json
+
+          MESSAGE_ID=$(jq -r '.id' message_out.json)
+          if [ -z "$MESSAGE_ID" ] || [ "$MESSAGE_ID" = "null" ]; then
+            echo "Failed to create message"; cat message_out.json; exit 1
+          fi
+
+          SAFE_REPO=$(echo "$REPO" | tr '/' '-')
+          THREAD_NAME="scout-${SAFE_REPO}-#${ISSUE_NUMBER}"
+
+          jq -n --arg name "$THREAD_NAME" --arg auto_archive_duration "1440" '{name:$name,auto_archive_duration:($auto_archive_duration|tonumber)}' > thread.json
+
+          curl -sS -X POST "https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages/${MESSAGE_ID}/threads" \
+            -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @thread.json > thread_out.json
+
+          THREAD_ID=$(jq -r '.id' thread_out.json)
+          if [ -z "$THREAD_ID" ] || [ "$THREAD_ID" = "null" ]; then
+            echo "Failed to create thread"; cat thread_out.json; exit 1
+          fi
+
+          PROPOSAL="Vorschlag (Scout):\n1) Repro-Schritte aus dem Issue in Checkliste überführen.\n2) Ursache auf eine konkrete Datei/Funktion eingrenzen (minimaler Scope).\n3) Fix-Plan als kleinsten sicheren Patch formulieren + 1 Testfall für den gemeldeten Case."
+
+          jq -n --arg content "$PROPOSAL" '{content:$content}' > proposal.json
+
+          curl -sS -X POST "https://discord.com/api/v10/channels/${THREAD_ID}/messages" \
+            -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @proposal.json > /dev/null
