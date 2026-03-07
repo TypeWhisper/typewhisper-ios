@@ -11,6 +11,7 @@ final class ModelManagerService: ObservableObject {
 
     private let whisperEngine = WhisperEngine()
     private let appleSpeechEngine = AppleSpeechEngine()
+    private let parakeetEngine = ParakeetEngine()
 
     private let modelKey = "selectedModelId"
     private let loadedModelsKey = "loadedModelIds"
@@ -35,6 +36,7 @@ final class ModelManagerService: ObservableObject {
         switch type {
         case .whisper: return whisperEngine
         case .appleSpeech: return appleSpeechEngine
+        case .parakeet: return parakeetEngine
         }
     }
 
@@ -62,14 +64,14 @@ final class ModelManagerService: ObservableObject {
 
         modelStatuses[model.id] = .downloading(progress: 0)
 
-        if let whisperEngine = engine as? WhisperEngine {
-            whisperEngine.onPhaseChange = { [weak self] phase in
-                Task { @MainActor [weak self] in
-                    guard self?.modelStatuses[model.id] != .ready else { return }
-                    self?.modelStatuses[model.id] = .loading(phase: phase)
-                }
+        let phaseHandler: (String?) -> Void = { [weak self] phase in
+            Task { @MainActor [weak self] in
+                guard self?.modelStatuses[model.id] != .ready else { return }
+                self?.modelStatuses[model.id] = .loading(phase: phase)
             }
         }
+        (engine as? WhisperEngine)?.onPhaseChange = phaseHandler
+        (engine as? ParakeetEngine)?.onPhaseChange = phaseHandler
 
         do {
             try await engine.loadModel(model) { [weak self] progress, speed in
@@ -85,11 +87,13 @@ final class ModelManagerService: ObservableObject {
 
             modelStatuses[model.id] = .ready
             (engine as? WhisperEngine)?.onPhaseChange = nil
+            (engine as? ParakeetEngine)?.onPhaseChange = nil
             activeEngine = engine
             selectModel(model.id)
             addToLoadedModels(model.id)
         } catch {
             (engine as? WhisperEngine)?.onPhaseChange = nil
+            (engine as? ParakeetEngine)?.onPhaseChange = nil
             modelStatuses[model.id] = .error(error.localizedDescription)
         }
     }
@@ -133,14 +137,14 @@ final class ModelManagerService: ObservableObject {
 
         modelStatuses[model.id] = .downloading(progress: 0)
 
-        if let whisperEngine = engine as? WhisperEngine {
-            whisperEngine.onPhaseChange = { [weak self] phase in
-                Task { @MainActor [weak self] in
-                    guard self?.modelStatuses[model.id] != .ready else { return }
-                    self?.modelStatuses[model.id] = .loading(phase: phase)
-                }
+        let phaseHandler: (String?) -> Void = { [weak self] phase in
+            Task { @MainActor [weak self] in
+                guard self?.modelStatuses[model.id] != .ready else { return }
+                self?.modelStatuses[model.id] = .loading(phase: phase)
             }
         }
+        (engine as? WhisperEngine)?.onPhaseChange = phaseHandler
+        (engine as? ParakeetEngine)?.onPhaseChange = phaseHandler
 
         do {
             try await engine.loadModel(model) { [weak self] progress, speed in
@@ -155,8 +159,10 @@ final class ModelManagerService: ObservableObject {
             }
             modelStatuses[model.id] = .ready
             (engine as? WhisperEngine)?.onPhaseChange = nil
+            (engine as? ParakeetEngine)?.onPhaseChange = nil
         } catch {
             (engine as? WhisperEngine)?.onPhaseChange = nil
+            (engine as? ParakeetEngine)?.onPhaseChange = nil
             modelStatuses[model.id] = .error(error.localizedDescription)
             removeFromLoadedModels(model.id)
         }

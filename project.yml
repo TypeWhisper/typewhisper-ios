@@ -16,6 +16,9 @@ packages:
   WhisperKit:
     url: https://github.com/argmaxinc/WhisperKit.git
     majorVersion: 0.9.0
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    majorVersion: 0.9.1
 
 targets:
   TypeWhisper:
@@ -34,6 +37,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
     dependencies:
       - package: WhisperKit
+      - package: FluidAudio
       - target: TypeWhisperKeyboard
 
   TypeWhisperKeyboard:

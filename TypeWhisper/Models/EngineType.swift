@@ -3,6 +3,7 @@ import Foundation
 enum EngineType: String, CaseIterable, Identifiable, Codable {
     case whisper
     case appleSpeech
+    case parakeet
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum EngineType: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .whisper: "WhisperKit"
         case .appleSpeech: "Apple Speech"
+        case .parakeet: "Parakeet"
         }
     }
 
@@ -17,6 +19,7 @@ enum EngineType: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .whisper: true
         case .appleSpeech: true
+        case .parakeet: false
         }
     }
 
@@ -24,6 +27,7 @@ enum EngineType: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .whisper: true
         case .appleSpeech: false
+        case .parakeet: false
         }
     }
 }

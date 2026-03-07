@@ -11,6 +11,10 @@ struct ModelManagerView: View {
         viewModel.models.filter { $0.engineType == .whisper }
     }
 
+    private var parakeetModels: [ModelInfo] {
+        viewModel.models.filter { $0.engineType == .parakeet }
+    }
+
     var body: some View {
         List {
             Section {
@@ -25,6 +29,20 @@ struct ModelManagerView: View {
                 Text("Built-in")
             } footer: {
                 Text("Apple's on-device speech recognition. No download required.")
+            }
+
+            Section {
+                ForEach(parakeetModels) { model in
+                    ModelRow(model: model, status: viewModel.status(for: model)) {
+                        viewModel.downloadModel(model)
+                    } onDelete: {
+                        viewModel.deleteModel(model)
+                    }
+                }
+            } header: {
+                Text("Parakeet Models")
+            } footer: {
+                Text("NVIDIA Parakeet TDT - fast and accurate. 25 European languages, no translation support.")
             }
 
             Section {

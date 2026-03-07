@@ -36,6 +36,10 @@ struct ModelInfo: Identifiable, Hashable {
         let ram = ProcessInfo.processInfo.physicalMemory
         let gb = ram / (1024 * 1024 * 1024)
 
+        if engineType == .parakeet {
+            return gb >= 4
+        }
+
         switch displayName {
         case "Tiny", "Base":
             return gb < 4
@@ -104,14 +108,26 @@ extension ModelInfo {
         ),
     ]
 
+    static let parakeetModels: [ModelInfo] = [
+        ModelInfo(
+            id: "parakeet-tdt-0.6b-v3",
+            engineType: .parakeet,
+            displayName: "Parakeet TDT v3",
+            sizeDescription: "~600 MB",
+            estimatedSizeMB: 600,
+            languageCount: 25
+        ),
+    ]
+
     static var allModels: [ModelInfo] {
-        appleSpeechModels + whisperModels
+        appleSpeechModels + whisperModels + parakeetModels
     }
 
     static func models(for engine: EngineType) -> [ModelInfo] {
         switch engine {
         case .whisper: whisperModels
         case .appleSpeech: appleSpeechModels
+        case .parakeet: parakeetModels
         }
     }
 }
