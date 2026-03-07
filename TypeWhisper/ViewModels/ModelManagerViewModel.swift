@@ -53,6 +53,10 @@ final class ModelManagerViewModel: ObservableObject {
         modelManager.isLoadingModel
     }
 
+    var selectedModelId: String? {
+        modelManager.selectedModelId
+    }
+
     var activeModelName: String? {
         guard let modelId = modelManager.selectedModelId else { return nil }
         return ModelInfo.allModels.first { $0.id == modelId }?.displayName
