@@ -213,6 +213,7 @@ struct RecordView: View {
             keyboardActivated = false
         }
         guard let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) else { return }
+        defaults.synchronize()
         keyboardHasFullAccess = defaults.bool(forKey: TypeWhisperConstants.SharedDefaults.keyboardHasFullAccess)
     }
 }

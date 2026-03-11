@@ -9,12 +9,7 @@ class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Report full access status to main app via App Group
-        if let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) {
-            defaults.set(hasFullAccess, forKey: TypeWhisperConstants.SharedDefaults.keyboardHasFullAccess)
-            defaults.set(Date().timeIntervalSince1970, forKey: TypeWhisperConstants.SharedDefaults.keyboardLastCheckedAt)
-        }
-
+        reportFullAccessStatus()
         setupAudioSession()
 
         let keyboardView = KeyboardHostingView(
@@ -59,6 +54,11 @@ class KeyboardViewController: UIInputViewController {
         }
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        reportFullAccessStatus()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -81,6 +81,14 @@ class KeyboardViewController: UIInputViewController {
         let metrics = KeyboardMetrics.resolve(for: size)
         if heightConstraint?.constant != metrics.keyboardHeight {
             heightConstraint?.constant = metrics.keyboardHeight
+        }
+    }
+
+    private func reportFullAccessStatus() {
+        if let defaults = UserDefaults(suiteName: TypeWhisperConstants.appGroupIdentifier) {
+            defaults.set(hasFullAccess, forKey: TypeWhisperConstants.SharedDefaults.keyboardHasFullAccess)
+            defaults.set(Date().timeIntervalSince1970, forKey: TypeWhisperConstants.SharedDefaults.keyboardLastCheckedAt)
+            defaults.synchronize()
         }
     }
 
