@@ -11,7 +11,8 @@ class KeyboardAudioService {
     private var pollingTimer: Timer?
 
     init() {
-        logger.info("KeyboardAudioService init: sharedDefaults=\(sharedDefaults != nil ? "OK" : "NIL")")
+        let hasDefaults = sharedDefaults != nil
+        logger.info("KeyboardAudioService init: sharedDefaults=\(hasDefaults ? "OK" : "NIL")")
     }
 
     /// Diagnostic info about App Group and Flow Session state
