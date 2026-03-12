@@ -10,17 +10,60 @@ class KeyboardAudioService {
 
     private var pollingTimer: Timer?
 
-    init() {}
+    init() {
+        logger.info("KeyboardAudioService init: sharedDefaults=\(sharedDefaults != nil ? "OK" : "NIL")")
+    }
+
+    /// Diagnostic info about App Group and Flow Session state
+    var diagnosticInfo: String {
+        var parts: [String] = []
+
+        if sharedDefaults == nil {
+            parts.append("UD=nil")
+        } else {
+            parts.append("UD=ok")
+        }
+
+        let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: TypeWhisperConstants.appGroupIdentifier
+        )
+        if containerURL == nil {
+            parts.append("container=nil")
+        } else {
+            parts.append("container=ok")
+        }
+
+        if let expires = sharedDefaults?.object(forKey: TypeWhisperConstants.SharedDefaults.flowSessionExpires) as? Date {
+            let remaining = expires.timeIntervalSinceNow
+            parts.append("exp=\(Int(remaining))s")
+        } else {
+            parts.append("exp=nil")
+        }
+
+        if let heartbeat = sharedDefaults?.object(forKey: TypeWhisperConstants.SharedDefaults.flowHeartbeat) as? Date {
+            let staleness = Date().timeIntervalSince(heartbeat)
+            parts.append("hb=\(String(format: "%.1f", staleness))s")
+        } else {
+            parts.append("hb=nil")
+        }
+
+        let active = sharedDefaults?.bool(forKey: TypeWhisperConstants.SharedDefaults.flowSessionActive) ?? false
+        parts.append("active=\(active)")
+
+        return parts.joined(separator: " | ")
+    }
 
     /// Check if a Flow Session is currently active AND the main app is alive
     var isFlowSessionActive: Bool {
         guard let expires = sharedDefaults?.object(forKey: TypeWhisperConstants.SharedDefaults.flowSessionExpires) as? Date,
               expires > Date() else {
+            logger.info("isFlowSessionActive=false reason=no_expires diag=[\(self.diagnosticInfo)]")
             return false
         }
 
         // Check heartbeat - main app writes Date() every 1s during active session
         guard let heartbeat = sharedDefaults?.object(forKey: TypeWhisperConstants.SharedDefaults.flowHeartbeat) as? Date else {
+            logger.info("isFlowSessionActive=false reason=no_heartbeat diag=[\(self.diagnosticInfo)]")
             return false
         }
         let staleness = Date().timeIntervalSince(heartbeat)

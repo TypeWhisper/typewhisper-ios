@@ -156,12 +156,41 @@ jobs:
           </plist>
           EOF
 
+      - name: Verify entitlements in archive
+        run: |
+          echo "=== Main App Entitlements ==="
+          codesign -d --entitlements - "$ARCHIVE_PATH/Products/Applications/TypeWhisper.app" 2>/dev/null || echo "No signature (expected with CODE_SIGNING_ALLOWED=NO)"
+
+          echo "=== Keyboard Extension Entitlements ==="
+          codesign -d --entitlements - "$ARCHIVE_PATH/Products/Applications/TypeWhisper.app/PlugIns/TypeWhisperKeyboard.appex" 2>/dev/null || echo "No signature (expected with CODE_SIGNING_ALLOWED=NO)"
+
+          echo "=== Checking embedded provisioning profiles ==="
+          ls -la "$ARCHIVE_PATH/Products/Applications/TypeWhisper.app/embedded.mobileprovision" 2>/dev/null || echo "No embedded profile in main app (expected)"
+          ls -la "$ARCHIVE_PATH/Products/Applications/TypeWhisper.app/PlugIns/TypeWhisperKeyboard.appex/embedded.mobileprovision" 2>/dev/null || echo "No embedded profile in keyboard (expected)"
+
       - name: Export IPA
         run: |
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist build/ExportOptions.plist \
             -exportPath "$EXPORT_PATH"
+
+      - name: Verify entitlements in exported IPA
+        run: |
+          IPA_PATH=$(ls "$EXPORT_PATH"/*.ipa)
+          TEMP_DIR=$(mktemp -d)
+          unzip -q "$IPA_PATH" -d "$TEMP_DIR"
+
+          echo "=== Main App Entitlements (signed) ==="
+          codesign -d --entitlements - "$TEMP_DIR/Payload/TypeWhisper.app" 2>&1
+
+          echo "=== Keyboard Extension Entitlements (signed) ==="
+          codesign -d --entitlements - "$TEMP_DIR/Payload/TypeWhisper.app/PlugIns/TypeWhisperKeyboard.appex" 2>&1
+
+          echo "=== Widget Extension Entitlements (signed) ==="
+          codesign -d --entitlements - "$TEMP_DIR/Payload/TypeWhisper.app/PlugIns/TypeWhisperWidget.appex" 2>&1
+
+          rm -rf "$TEMP_DIR"
 
       - name: Upload to App Store Connect
         env:

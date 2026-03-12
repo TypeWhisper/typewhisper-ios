@@ -320,7 +320,9 @@ class KeyboardViewModel: ObservableObject {
         isRecording = false
         isProcessing = false
         isPendingStart = true
-        bannerMessage = message
+        let diag = audioService?.diagnosticInfo ?? "no service"
+        bannerMessage = "\(message) [\(diag)]"
+        logger.info("beginFlowStart: \(diag)")
         bannerActionTitle = L10n.openApp
         bannerOpensSettings = false
         flowStartDeadline = startPolling ? Date().addingTimeInterval(10) : nil
@@ -377,7 +379,9 @@ class KeyboardViewModel: ObservableObject {
                 if let deadline = self.flowStartDeadline, Date() > deadline, !self.isFlowSessionActive {
                     self.isPendingStart = false
                     self.flowStartDeadline = nil
-                    self.bannerMessage = L10n.flowSessionNotActive
+                    let diag = self.audioService?.diagnosticInfo ?? "no service"
+                    self.bannerMessage = "\(L10n.flowSessionNotActive) [\(diag)]"
+                    logger.info("flowStatusTimer timeout: \(diag)")
                     self.stopFlowStatusTimer()
                 }
             }
