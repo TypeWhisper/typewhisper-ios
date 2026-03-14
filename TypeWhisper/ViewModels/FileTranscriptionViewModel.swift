@@ -143,6 +143,14 @@ final class FileTranscriptionViewModel: ObservableObject {
         UIPasteboard.general.string = allText
     }
 
+    func addFilesFromShare(_ urls: [URL]) {
+        let existingURLs = Set(files.map(\.url))
+        let newFiles = urls
+            .filter { !existingURLs.contains($0) }
+            .map { FileItem(url: $0) }
+        files.append(contentsOf: newFiles)
+    }
+
     func reset() {
         files = []
         batchState = .idle

@@ -175,6 +175,8 @@ class FlowSessionManager: ObservableObject {
     @Published var isRecording = false
     @Published var lastTranscription: String?
     @Published var openedFromKeyboard = false
+    @Published var showFileTranscriptionSheet = false
+    weak var fileTranscriptionViewModel: FileTranscriptionViewModel?
     private var audioEngine: AVAudioEngine?
     private var sessionTimer: Timer?
     private var pollingTimer: Timer?
@@ -663,6 +665,10 @@ class FlowSessionManager: ObservableObject {
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
 
         switch url.host {
+        case "share":
+            handleIncomingShare()
+            return true
+
         case "startflow":
             var duration: TimeInterval = 300
             if let durationParam = components?.queryItems?.first(where: { $0.name == "duration" })?.value,
@@ -688,6 +694,103 @@ class FlowSessionManager: ObservableObject {
 
         default:
             return false
+        }
+    }
+
+    // MARK: - Share Extension Handling
+
+    func handleIncomingShare() {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: TypeWhisperConstants.appGroupIdentifier
+        ) else {
+            logger.error("Cannot access App Group container")
+            return
+        }
+
+        let payloadURL = containerURL.appendingPathComponent(
+            TypeWhisperConstants.SharedFiles.pendingShareFile
+        )
+
+        guard FileManager.default.fileExists(atPath: payloadURL.path) else {
+            logger.warning("No pending_share.json found")
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: payloadURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .secondsSince1970
+            let payload = try decoder.decode(SharePayloadDTO.self, from: data)
+
+            let sharedFilesDir = containerURL.appendingPathComponent(
+                TypeWhisperConstants.SharedFiles.sharedFilesDirectory
+            )
+
+            let urls = payload.files.compactMap { entry -> URL? in
+                let url = sharedFilesDir.appendingPathComponent(entry.localPath)
+                return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            }
+
+            guard !urls.isEmpty else {
+                logger.warning("No shared files found on disk")
+                try? FileManager.default.removeItem(at: payloadURL)
+                return
+            }
+
+            fileTranscriptionViewModel?.addFilesFromShare(urls)
+            showFileTranscriptionSheet = true
+
+            if fileTranscriptionViewModel?.canTranscribe == true {
+                fileTranscriptionViewModel?.transcribeAll()
+            }
+
+            try FileManager.default.removeItem(at: payloadURL)
+            logger.info("Processed \(urls.count) shared files")
+        } catch {
+            logger.error("Failed to process pending share: \(error)")
+            try? FileManager.default.removeItem(at: payloadURL)
+        }
+    }
+
+    func checkPendingSharedFiles() {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: TypeWhisperConstants.appGroupIdentifier
+        ) else { return }
+
+        let payloadURL = containerURL.appendingPathComponent(
+            TypeWhisperConstants.SharedFiles.pendingShareFile
+        )
+
+        if FileManager.default.fileExists(atPath: payloadURL.path) {
+            handleIncomingShare()
+        }
+
+        cleanupStaleSharedFiles()
+    }
+
+    func cleanupStaleSharedFiles() {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: TypeWhisperConstants.appGroupIdentifier
+        ) else { return }
+
+        let sharedFilesDir = containerURL.appendingPathComponent(
+            TypeWhisperConstants.SharedFiles.sharedFilesDirectory
+        )
+
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: sharedFilesDir,
+            includingPropertiesForKeys: [.creationDateKey]
+        ) else { return }
+
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+
+        for item in contents {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: item.path),
+                  let created = attrs[.creationDate] as? Date,
+                  created < cutoff else { continue }
+
+            try? FileManager.default.removeItem(at: item)
+            logger.info("Cleaned up stale shared file: \(item.lastPathComponent)")
         }
     }
 }

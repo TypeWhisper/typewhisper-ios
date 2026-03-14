@@ -17,10 +17,7 @@ final class AudioFileService: Sendable {
         }
     }
 
-    static let supportedExtensions: Set<String> = [
-        "wav", "mp3", "m4a", "flac", "aac", "ogg", "wma",
-        "mp4", "mov", "mkv", "avi"
-    ]
+    static let supportedExtensions = TypeWhisperConstants.supportedAudioVideoExtensions
 
     func loadAudioSamples(from url: URL) async throws -> [Float] {
         let didStartAccessing = url.startAccessingSecurityScopedResource()

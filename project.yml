@@ -43,6 +43,7 @@ targets:
       - package: FluidAudio
       - target: TypeWhisperKeyboard
       - target: TypeWhisperWidget
+      - target: TypeWhisperShare
 
   TypeWhisperWidget:
     type: app-extension
@@ -61,6 +62,24 @@ targets:
       configs:
         Release:
           PROVISIONING_PROFILE_SPECIFIER: $(TW_WG_PROFILE)
+
+  TypeWhisperShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: TypeWhisperShare
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.typewhisper.typewhisper-app.share
+        INFOPLIST_FILE: TypeWhisperShare/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TypeWhisperShare/TypeWhisperShare.entitlements
+        MARKETING_VERSION: 0.1
+        CURRENT_PROJECT_VERSION: 1
+        SKIP_INSTALL: true
+      configs:
+        Release:
+          PROVISIONING_PROFILE_SPECIFIER: $(TW_SH_PROFILE)
 
   TypeWhisperKeyboard:
     type: app-extension
@@ -87,6 +106,7 @@ schemes:
         TypeWhisper: all
         TypeWhisperKeyboard: all
         TypeWhisperWidget: all
+        TypeWhisperShare: all
     run:
       config: Debug
     test:

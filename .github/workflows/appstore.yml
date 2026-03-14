@@ -78,6 +78,7 @@ jobs:
           APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE }}
           KEYBOARD_PROFILE_BASE64: ${{ secrets.IOS_KEYBOARD_PROVISIONING_PROFILE }}
           WIDGET_PROFILE_BASE64: ${{ secrets.IOS_WIDGET_PROVISIONING_PROFILE }}
+          SHARE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_PROVISIONING_PROFILE }}
         run: |
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
 
@@ -111,6 +112,16 @@ jobs:
           echo "WG_PROFILE_NAME=$WG_PROFILE_NAME" >> $GITHUB_ENV
           echo "Installed widget profile: $WG_PROFILE_NAME ($WG_PROFILE_UUID)"
 
+          # Share extension profile
+          SH_PROFILE_PATH="$RUNNER_TEMP/share_profile.mobileprovision"
+          echo "$SHARE_PROFILE_BASE64" | base64 --decode > "$SH_PROFILE_PATH"
+          /usr/bin/security cms -D -i "$SH_PROFILE_PATH" > "$RUNNER_TEMP/sh_profile.plist"
+          SH_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/sh_profile.plist")
+          SH_PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/sh_profile.plist")
+          cp "$SH_PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$SH_PROFILE_UUID.mobileprovision"
+          echo "SH_PROFILE_NAME=$SH_PROFILE_NAME" >> $GITHUB_ENV
+          echo "Installed share profile: $SH_PROFILE_NAME ($SH_PROFILE_UUID)"
+
       - name: Archive
         run: |
           xcodebuild archive \
@@ -125,6 +136,7 @@ jobs:
             TW_APP_PROFILE="$APP_PROFILE_NAME" \
             TW_KB_PROFILE="$KB_PROFILE_NAME" \
             TW_WG_PROFILE="$WG_PROFILE_NAME" \
+            TW_SH_PROFILE="$SH_PROFILE_NAME" \
             MARKETING_VERSION="${{ inputs.version }}" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
@@ -150,6 +162,8 @@ jobs:
               <string>${KB_PROFILE_NAME}</string>
               <key>com.typewhisper.typewhisper-app.widget</key>
               <string>${WG_PROFILE_NAME}</string>
+              <key>com.typewhisper.typewhisper-app.share</key>
+              <string>${SH_PROFILE_NAME}</string>
             </dict>
             <key>signingCertificate</key>
             <string>Apple Distribution</string>
@@ -195,6 +209,9 @@ jobs:
           echo "=== Widget Extension Entitlements (signed) ==="
           codesign -d --entitlements - "$TEMP_DIR/Payload/TypeWhisper.app/PlugIns/TypeWhisperWidget.appex" 2>&1
 
+          echo "=== Share Extension Entitlements (signed) ==="
+          codesign -d --entitlements - "$TEMP_DIR/Payload/TypeWhisper.app/PlugIns/TypeWhisperShare.appex" 2>&1
+
           rm -rf "$TEMP_DIR"
 
       - name: Upload to App Store Connect
@@ -227,5 +244,6 @@ jobs:
           rm -f "$RUNNER_TEMP/app_profile.mobileprovision"
           rm -f "$RUNNER_TEMP/keyboard_profile.mobileprovision"
           rm -f "$RUNNER_TEMP/widget_profile.mobileprovision"
+          rm -f "$RUNNER_TEMP/share_profile.mobileprovision"
           rm -rf ~/Library/MobileDevice/Provisioning\ Profiles/
           rm -rf ~/.private_keys/

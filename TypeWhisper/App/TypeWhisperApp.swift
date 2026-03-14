@@ -4,6 +4,7 @@ import Translation
 @main
 struct TypeWhisperApp: App {
     @StateObject private var container = ServiceContainer.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -22,10 +23,23 @@ struct TypeWhisperApp: App {
                 .environmentObject(container.flowSessionManager)
                 .modifier(TranslationTaskModifier(translationService: container.translationService))
                 .onOpenURL { url in
-                    container.flowSessionManager.handleURL(url)
+                    if url.isFileURL {
+                        container.fileTranscriptionViewModel.addFilesFromShare([url])
+                        container.flowSessionManager.showFileTranscriptionSheet = true
+                        if container.fileTranscriptionViewModel.canTranscribe {
+                            container.fileTranscriptionViewModel.transcribeAll()
+                        }
+                    } else {
+                        container.flowSessionManager.handleURL(url)
+                    }
                 }
                 .task {
                     await container.initialize()
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .active {
+                        container.flowSessionManager.checkPendingSharedFiles()
+                    }
                 }
         }
     }

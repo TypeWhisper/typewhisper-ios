@@ -108,6 +108,9 @@ final class ServiceContainer: ObservableObject {
         }
         #endif
 
+        // Wire Share Extension handling
+        flowSessionManager.fileTranscriptionViewModel = fileTranscriptionViewModel
+
         // Set shared references
         ModelManagerViewModel._shared = modelManagerViewModel
         FileTranscriptionViewModel._shared = fileTranscriptionViewModel
@@ -123,6 +126,7 @@ final class ServiceContainer: ObservableObject {
     func initialize() async {
         historyService.importKeyboardHistory()
         historyService.purgeOldRecords()
+        flowSessionManager.checkPendingSharedFiles()
         await modelManagerService.loadAllSavedModels()
     }
 }

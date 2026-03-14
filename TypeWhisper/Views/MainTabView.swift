@@ -25,6 +25,16 @@ struct MainTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: flowSessionManager.openedFromKeyboard)
+        .sheet(isPresented: $flowSessionManager.showFileTranscriptionSheet) {
+            NavigationStack {
+                FileTranscriptionView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { flowSessionManager.showFileTranscriptionSheet = false }
+                        }
+                    }
+            }
+        }
     }
 }
 
