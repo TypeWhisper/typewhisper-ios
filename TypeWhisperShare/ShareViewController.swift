@@ -9,6 +9,10 @@ class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         processSharedItems()
     }
 
@@ -61,12 +65,9 @@ class ShareViewController: UIViewController {
                 try writePayload(files: files)
 
                 await MainActor.run {
-                    statusLabel.text = "Done! Open TypeWhisper to transcribe."
-                    statusLabel.textColor = .label
-                    spinner.stopAnimating()
+                    _ = openContainingApp()
                 }
 
-                try? await Task.sleep(for: .seconds(1))
                 extensionContext?.completeRequest(returningItems: nil)
             } catch {
                 showError(error.localizedDescription)
@@ -181,6 +182,20 @@ class ShareViewController: UIViewController {
             try? await Task.sleep(for: .seconds(2))
             extensionContext?.cancelRequest(withError: ShareError.userMessage(message))
         }
+    }
+
+    // Bluesky-style: walk responder chain, find UIApplication, call open()
+    @objc private func openContainingApp() -> Bool {
+        guard let url = URL(string: "typewhisper://share") else { return false }
+        var responder: UIResponder? = self
+        while responder != nil {
+            if let application = responder as? UIApplication {
+                application.open(url)
+                return true
+            }
+            responder = responder?.next
+        }
+        return false
     }
 
     enum ShareError: LocalizedError {
