@@ -39,7 +39,7 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
             onPhaseChange?("loading")
 
             let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            try await manager.loadModels(models)
             progress(0.90, nil)
             onPhaseChange?("prewarming")
 
