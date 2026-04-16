@@ -62,4 +62,22 @@ final class DictionaryViewModel: ObservableObject {
     func learnCorrection(original: String, replacement: String) {
         dictionaryService.learnCorrection(original: original, replacement: replacement)
     }
+
+    // MARK: - Export / Import
+
+    func exportDocument() -> DictionaryExportDocument {
+        DictionaryExportDocument(entries: entries)
+    }
+
+    func importDictionary(from url: URL) throws -> DictionaryExporter.ImportResult {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        let data = try Data(contentsOf: url)
+        let parsed = try DictionaryExporter.parseJSON(data)
+        guard !parsed.isEmpty else {
+            throw DictionaryImportError.emptyFile
+        }
+        return DictionaryExporter.importEntries(parsed, into: dictionaryService)
+    }
 }
