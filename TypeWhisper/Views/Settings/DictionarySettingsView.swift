@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DictionarySettingsView: View {
     @EnvironmentObject private var viewModel: DictionaryViewModel
@@ -8,6 +9,12 @@ struct DictionarySettingsView: View {
     @State private var newReplacement = ""
     @State private var newType: DictionaryEntryType = .term
     @State private var newCaseSensitive = false
+    @State private var showingImporter = false
+    @State private var showingExporter = false
+    @State private var exportDocument: DictionaryExportDocument?
+    @State private var importMessage: String?
+    @State private var error: String?
+    @State private var showingAlert = false
 
     var body: some View {
         List {
@@ -41,10 +48,62 @@ struct DictionarySettingsView: View {
                 }
             }
         }
+        .fileExporter(isPresented: $showingExporter, document: exportDocument, contentType: .json, defaultFilename: "dictionary-export.json") { result in
+            if case .failure(let err) = result {
+                error = err.localizedDescription
+                showingAlert = true
+            }
+        }
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url):
+                do {
+                    let importResult = try viewModel.importDictionary(from: url)
+                    if importResult.skipped > 0 {
+                        importMessage = "\(importResult.imported) entries imported, \(importResult.skipped) duplicates skipped."
+                    } else {
+                        importMessage = "\(importResult.imported) entries imported."
+                    }
+                } catch {
+                    self.error = error.localizedDescription
+                }
+                showingAlert = true
+            case .failure(let err):
+                error = err.localizedDescription
+                showingAlert = true
+            }
+        }
+        .alert("Dictionary Import", isPresented: $showingAlert) {
+            Button("OK") {
+                importMessage = nil
+                error = nil
+            }
+        } message: {
+            Text(importMessage ?? error ?? "")
+        }
         .searchable(text: $viewModel.searchQuery, prompt: "Search dictionary")
         .navigationTitle("Dictionary")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Button {
+                        exportDocument = viewModel.exportDocument()
+                        showingExporter = true
+                    } label: {
+                        Label(String(localized: "Export..."), systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(viewModel.entries.isEmpty)
+
+                    Button {
+                        showingImporter = true
+                    } label: {
+                        Label(String(localized: "Import..."), systemImage: "square.and.arrow.down")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingAddSheet = true
