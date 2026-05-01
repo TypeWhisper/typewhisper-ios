@@ -78,8 +78,9 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
         let audioDuration = Double(audioSamples.count) / 16000.0
 
         logger.info("Transcribing \(audioSamples.count) samples (\(String(format: "%.1f", audioDuration))s audio), lang=\(language ?? "auto")")
-        try await asrManager.resetDecoderState(for: .system)
-        let result = try await asrManager.transcribe(audioSamples, source: .system)
+        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let fluidLanguage = language.flatMap { FluidAudio.Language(rawValue: $0.lowercased()) }
+        let result = try await asrManager.transcribe(audioSamples, decoderState: &decoderState, language: fluidLanguage)
 
         let processingTime = CFAbsoluteTimeGetCurrent() - startTime
         logger.info("Parakeet done in \(String(format: "%.2f", processingTime))s: \(result.text.prefix(80))")
